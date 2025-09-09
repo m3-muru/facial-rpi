@@ -1,0 +1,32 @@
+[
+    {
+        "device": "COM3",
+        "name": "COM3",
+        "description": "USB Serial Device (COM3)",
+        "hwid": "USB VID:PID=2AAD:6373 SER=00.00.01 LOCATION=1-4.3:x.2",
+        "vid": 10925,
+        "pid": 25459,
+        "serial_number": "00.00.01",
+        "location": "1-4.3:x.2",
+        "manufacturer": "Microsoft",
+        "product": null,
+        "interface": null,
+        "connection_date": "16/06/22",
+        "connection_time": "10:53:18"
+    },
+    {
+        "device": "COM3",
+        "name": "COM3",
+        "description": "USB Serial Device (COM3)",
+        "hwid": "USB VID:PID=2AAD:6373 SER=00.00.01 LOCATION=1-4.3:x.2",
+        "vid": 10925,
+        "pid": 25459,
+        "serial_number": "00.00.01",
+        "location": "1-4.3:x.2",
+        "manufacturer": "Microsoft",
+        "product": null,
+        "interface": null,
+        "connection_date": "16/06/22",
+        "connection_time": "10:54:40"
+    }
+]

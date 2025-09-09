@@ -1,0 +1,214 @@
+import tkinter as tk
+import queue
+import time
+import socket
+
+from src.configuration.app_authentication_config import _AppConfiguration
+
+import src.utility.gui_window_utility as window_utility
+
+from src.processor.image_processor import ImageProcessor
+from src.processor.face_processor import FaceProcessor
+
+from src.network_comms.socket_handler import SocketHandler
+from src.network_comms.database_handler import DatabaseHandler  # Import for status ping
+
+from src.GUI_authentication.command_interface import CommandInterface
+from src.GUI_authentication.image_feedback import ImageFeedback
+from src.GUI_authentication.status_bar import StatusBar
+from src.GUI_authentication.msg_bar_faces_detected import FacesDetetectedMsgBar
+from src.GUI_authentication.msg_bar_debugger import DebugMsgBar
+
+import src.logger.custom_logger as custom_logger
+import webbrowser
+
+LOGGER = custom_logger.get_logger()
+
+
+class AuthenticationApplication(tk.Frame):
+    def __init__(self, parent):
+        tk.Frame.__init__(self, parent)
+
+        self.parent = parent
+
+        # ---Config initialization---
+        self.config = _AppConfiguration()
+
+        # ---Communication queues creation---
+        self.cmd_request_q = queue.Queue()
+        self.ready_status_q = queue.Queue()
+        self.feedback_livestream_image_q = queue.Queue()
+        self.feedback_livestream_detections_q = queue.Queue()
+        self.feedback_msg_q = queue.Queue()
+        self.faces_detected_feedback_q = queue.Queue()
+
+        self.START_DELAY = 0
+
+        # ---Generate unique station ID---
+        self.station_id = self.generate_station_id()
+        LOGGER.info(f"Station ID: {self.station_id}")
+
+        # ---Processor creation---
+        self.socket_handler = SocketHandler()
+        self.image_processor = ImageProcessor(
+            self.feedback_livestream_image_q, self.feedback_livestream_detections_q, self.config
+        )
+        self.face_processor = FaceProcessor(
+            self,
+            self.cmd_request_q, self.ready_status_q,
+            self.feedback_msg_q, self.faces_detected_feedback_q,
+            self.feedback_livestream_detections_q, self.config,
+            FaceProcessor.MODE_AUTHENTICATION, self.socket_handler)
+
+        # ---Begin Processors---
+        self.begin_web_socket_server()
+        time.sleep(self.START_DELAY)
+        self.begin_image_processing()
+        self.begin_face_processing()
+
+        # ---Start App Status Heartbeat---
+        self.start_app_status_heartbeat()
+
+        # ---Internal GUI content creation---
+        self.image_feedback_frame = ImageFeedback(self, self.config, self.feedback_livestream_image_q)
+        self.image_feedback_frame.debug_color = "#00cc00"  # green
+        self.image_feedback_frame.pack(side=tk.TOP)
+
+        self.status_bar = StatusBar(self, self.feedback_msg_q)
+        self.status_bar.debug_color = "#33FFF3"  # teal
+        self.status_bar.pack()
+
+        self.cmd_interface_frame = CommandInterface(self, self.config, self.cmd_request_q, self.ready_status_q)
+        self.cmd_interface_frame.debug_color = "#FF5733"  # orange
+        self.cmd_interface_frame.pack()
+
+        # ---Debugger related---
+        self.debug_msg_bar = DebugMsgBar(self, self.config)
+        self.debug_toggle_gui_border_color()
+        self.init_debug_app_size_printout()
+        self.parent.bind('<F1>', (lambda event: window_utility.align_window(self.parent, window_utility.ALIGN_CENTER)))
+        self.parent.bind('<F2>', (
+            lambda event: window_utility.align_window(self.parent, window_utility.ALIGN_TOP_RIGHT)
+        ))
+        self.parent.bind('<F3>', (lambda event: window_utility.print_window_properties(self.parent)))
+        self.parent.bind('<F4>', (lambda event: self.toggle_debug_app_size_printout_enabled()))
+
+        # ---Init root GUI window properties---
+        self.init_window_properties()
+        self.parent.bind('<<ON_IMAGE_FEEDBACK_SET>>', (lambda event: self.align_app_on_image_feedback_set()))
+        self.parent.protocol("WM_DELETE_WINDOW", self.quit_app)
+
+    def generate_station_id(self):
+        """
+        Generate a unique station ID based on hostname and IP
+        """
+        try:
+            hostname = socket.gethostname()
+            local_ip = socket.gethostbyname(hostname)
+            # Create a station ID like: "ETC_hostname_192.168.1.100"
+            station_id = f"ETC_{hostname}_{local_ip.replace('.', '_')}"
+            return station_id
+        except Exception as e:
+            LOGGER.error(f"Error generating station ID: {e}")
+            return "ETC_UNKNOWN_STATION"
+
+    def start_app_status_heartbeat(self):
+        """
+        Start sending regular status pings to the server
+        """
+        try:
+            # Send initial status ping
+            DatabaseHandler.send_app_status_ping(self.station_id)
+            
+            # Start continuous heartbeat (every 60 seconds)
+            DatabaseHandler.init_app_status_heartbeat(self.station_id, interval_seconds=60)
+            
+            LOGGER.info("App status heartbeat initialized successfully")
+        except Exception as e:
+            LOGGER.error(f"Failed to initialize app status heartbeat: {e}")
+
+    def exit(self):
+        import os
+        LOGGER.info(f'Application exiting...')
+        
+        # Send final status ping before exit
+        try:
+            import datetime
+            final_status = {
+                "station_id": self.station_id,
+                "hostname": socket.gethostname(),
+                "ip_address": socket.gethostbyname(socket.gethostname()),
+                "timestamp": datetime.datetime.now().isoformat(),
+                "status": "shutting_down",
+                "app_version": "1.0.0",
+                "last_ping": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            }
+            DatabaseHandler.send_app_status_ping(self.station_id)
+            LOGGER.info("Final status ping sent")
+        except Exception as e:
+            LOGGER.error(f"Failed to send final status ping: {e}")
+        
+        os._exit(0)
+
+    def quit_app(self):
+        self.status_bar.set_msg('Goodbye~')
+        self.after(500, lambda: self.exit())
+
+    def align_app_on_image_feedback_set(self):
+        LOGGER.debug('<<ON_IMAGE_FEEDBACK_SET>>')
+        self.parent.unbind('<<ON_IMAGE_FEEDBACK_SET>>')
+        window_utility.align_window(self.parent, window_utility.ALIGN_TOP_RIGHT)
+        
+        self.parent.event_generate("<<ON_APP_ALIGNED>>")
+
+    def toggle_debug_app_size_printout_enabled(self):
+        self.config.debug_app_size_printout_enabled = False \
+            if self.config.debug_app_size_printout_enabled \
+            else True
+        self.init_debug_app_size_printout()
+
+    def init_debug_app_size_printout(self):
+        if self.config.debug_app_size_printout_enabled:
+            self.parent.bind('<Configure>', lambda event: window_utility.print_window_properties(self.parent))
+        else:
+            self.parent.unbind('<Configure>')
+
+    def init_window_properties(self):
+        self.parent.title(f'ENVIS Face Recognition - {self.station_id}')  # Include station ID in title
+
+        # Force window to always be on top
+        self.parent.attributes("-topmost", True)
+
+    def begin_image_processing(self):
+        self.image_processor.start()
+
+    def begin_face_processing(self):
+        self.face_processor.start()
+
+    def begin_web_socket_server(self):
+        self.socket_handler.start()
+
+    def debug_toggle_gui_border_color(self):
+        if self.config.debug_toggle_border_color_enabled:
+            def _debug_toggle_border_color(target):
+                for key, value in target.children.items():
+                    try:
+                        _debug_toggle_border_color(value)
+                        value.configure(highlightbackground=value.debug_color, highlightthickness=3)
+                    except:
+                        pass
+
+            _debug_toggle_border_color(self)
+
+
+def main():
+    LOGGER.info(f'Application starting...')
+    root = tk.Tk()
+    AuthenticationApplication(root).pack(side="top", fill="both", expand=True)
+    webbrowser.open("http://localhost:8080/psms/mcs/ETC.xhtml?mode=facial&inout=O")
+
+    root.mainloop()
+
+
+if __name__ == "__main__":
+    main()

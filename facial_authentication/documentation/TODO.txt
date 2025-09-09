@@ -1,0 +1,81 @@
+############### New feature request
+-Application to run as a service
+-Popup notification box
+-Global exception catcher
+-Gesture recognition integration
+
+- General
+    Config to be stored and pulled from the DB
+    Perform local logging for all events, most importantly:
+        During authentication each faceprint match confidence
+        Total number of records synced from db
+
+- Authentication app
+    Remove the 2nd textbox or change it to "client connected/not connected"
+    Replace the Quit button with Resync button
+    Make window width smaller without whitespaces at the side
+
+- Enrolment app
+    Remove the 2nd textbox
+    Remove the Quit button
+    Center align the Enroll button
+    Test if window always spawn in the center even if the resolution is big
+
+- Authentication GUI should detect and authenticate faces on the fly (whenever there is a face present) without button
+    clicks intervention
+
+- Authentication GUI to have a resync button. On click, fetch all descriptor from DB
+
+- Enrolment GUI only administrator can use
+    Some form of password access popup box at the frontend(?)
+
+- Find a way to register the authentication app as a window service so the app starts automatically upon window startup
+
+############### Pending features
+- Clean up project's extraneous files, folders and structure
+
+- Clean up entire n_face_processor.py file and its printout
+
+- Implement cancel button logic
+    poll for cancel request, need to register current active rsid_py.FaceAuthenticator so it can be active at will
+
+- Implement long enroll logic
+
+- Implement disabling of all buttons except for cancel and quit button on enrollment/authentication\
+
+- Implement responsive GUI sizing layout
+
+############### Completed feature
+- On successful authentication, send authenticated employee ID to browser
+    through the use of socket:
+        ETC page on load, JS creates socket(client) and connect to python socket(server).
+            Once connected, continuously listen for incoming message
+        Python app socket is always alive on application running
+            Once authenticated, just sent message through the socket
+
+- Separate authentication and enrolment GUI as standalone GUIs
+    Authentication window must be small because ETC browser window need to be 100%.
+        It will only need to have 1x "authenticate" button, 1x status bar and 1x "x" close button.
+        Make this window ALWAYS ON TOP and occupy the remaining whitespace of the ETC browser window
+    Enrolment window can be big
+
+- Enrolment and authentication backend to talk to DB through REST API
+    Don't need encryption or security implementation (yet)
+
+- Find a way to make the window of the authentication app to be always at the top and fixed to the bottom right of screen
+
+
+03/03/2022:
+-Environment settings saved on local file so app can decide which url to use by parsing
+
+- Crash prevention fix:
+    No log folder found
+    Unable to established db connection in authen app during authentication
+    Unable to established db connection in enroll app during enrolment
+    On X button clicked, catch event and end the program gracefully
+
+- Log all activities of the application into the local system.
+   Separate the logging into 2 files, [date]-enrolment.log and [date]-authentication.log
+
+- Configurable dynamic settings in a file(?), see n_configuration.py
+    So can easily switch to any database config (e.g., choice of testing or production DB) through different parameters

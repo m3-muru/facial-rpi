@@ -1,0 +1,21 @@
+SDK and firmware location:
+C:\Program Files\Intel RealSenseID SDK\firmware\sku1
+
+Additional information:
+ * S/N: 10446228068699A27FM10464-100
+ * Firmware: NNLAS:2.12.21.0|DNET:4.5.20.0|YOLO:26.2.21.0|RECOG:28.2.21.0|AS2DLR:23.2.21.0|OPFW:2.4.2.74|NNLED:2.22.21.0
+ * Host: 0.25.0
+ 
+.\tools\rsid-fw-update.exe --file .\firmware\sku1\F450_3.1.0.29_SKU1_SIGNED.bin --port COM5 --force-version
+
+Additional information:
+ * S/N: 10446228068699A27FM10464-100
+ * Firmware: DNET:20.4.21.0|YOLO:25.4.21.0|RECOG:19.5.21.0|AS2DLR:31.5.21.0|OPFW:3.1.0.29|NNLED:2.22.21.0|NNLAS:2.12.21.0
+ * Host: 0.25.0
+
+.\tools\rsid-fw-update.exe --file .\firmware\sku1\F450_4.3.0.8200_SKU1_SIGNED.bin --port COM5
+
+Additional information:
+ * S/N: 10446228068699A27FM10464-100
+ * Firmware: YOLO:6.6.21.0|RECOG:1.6.21.0|AS2DLR:31.5.21.0|NNLED:7.26.21.0|OPFW:4.3.0.8200|NNLAS:7.13.21.0|DNET:20.4.21.0
+ * Host: 0.25.0

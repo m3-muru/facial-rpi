@@ -1,0 +1,2 @@
+1. check venv config
+2. Authentication.bat %pythonpath%

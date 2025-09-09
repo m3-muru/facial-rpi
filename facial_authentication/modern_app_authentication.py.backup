@@ -1,0 +1,625 @@
+import tkinter as tk
+from tkinter import ttk
+import ttkbootstrap as ttk_modern
+from ttkbootstrap.constants import *
+import queue
+import time
+import socket
+from datetime import datetime
+import threading
+
+from src.configuration.app_authentication_config import _AppConfiguration
+import src.utility.gui_window_utility as window_utility
+from src.processor.image_processor import ImageProcessor
+from src.processor.face_processor import FaceProcessor
+from src.network_comms.socket_handler import SocketHandler
+from src.network_comms.database_handler import DatabaseHandler
+
+# Import modernized components
+from src.GUI_authentication.modern_components.modern_image_feedback import ModernImageFeedback
+from src.GUI_authentication.modern_components.modern_status_bar import ModernStatusBar
+from src.GUI_authentication.modern_components.modern_command_interface import ModernCommandInterface
+from src.GUI_authentication.modern_components.modern_header import ModernHeader
+from src.GUI_authentication.modern_components.modern_system_panel import ModernSystemPanel
+
+import src.logger.custom_logger as custom_logger
+import webbrowser
+
+LOGGER = custom_logger.get_logger()
+
+# Modern color scheme
+MODERN_COLORS = {
+    'primary': '#2563EB',
+    'secondary': '#64748B', 
+    'success': '#10B981',
+    'warning': '#F59E0B',
+    'danger': '#EF4444',
+    'background': '#0F172A',
+    'surface': '#1E293B',
+    'surface_light': '#334155',
+    'text_primary': '#F8FAFC',
+    'text_secondary': '#CBD5E1',
+    'accent': '#8B5CF6'
+}
+
+class ModernAuthenticationApplication(ttk_modern.Frame):
+    def __init__(self, parent):
+        super().__init__(parent)
+        
+        self.parent = parent
+        self.setup_modern_theme()
+        
+        # ---Config initialization---
+        self.config = _AppConfiguration()
+        
+        # ---Communication queues creation---
+        self.cmd_request_q = queue.Queue()
+        self.ready_status_q = queue.Queue()
+        self.feedback_livestream_image_q = queue.Queue()
+        self.feedback_livestream_detections_q = queue.Queue()
+        self.feedback_msg_q = queue.Queue()
+        self.faces_detected_feedback_q = queue.Queue()
+        
+        self.START_DELAY = 0
+        
+        # ---Generate unique station ID---
+        self.station_id = self.generate_station_id()
+        LOGGER.info(f"Station ID: {self.station_id}")
+        
+        # ---Processor creation---
+        self.socket_handler = SocketHandler()
+        self.image_processor = ImageProcessor(
+            self.feedback_livestream_image_q, 
+            self.feedback_livestream_detections_q, 
+            self.config
+        )
+        self.face_processor = FaceProcessor(
+            self,
+            self.cmd_request_q, 
+            self.ready_status_q,
+            self.feedback_msg_q, 
+            self.faces_detected_feedback_q,
+            self.feedback_livestream_detections_q, 
+            self.config,
+            FaceProcessor.MODE_AUTHENTICATION, 
+            self.socket_handler
+        )
+        
+        # ---Initialize modern UI components---
+        self.init_single_column_scrollable_ui()
+        
+        # ---Begin Processors---
+        self.begin_processors()
+        
+        # ---Start App Status Heartbeat---
+        self.start_app_status_heartbeat()
+        
+        # ---Initialize window properties---
+        self.init_modern_window_properties()
+        
+        # ---Bind events---
+        self.bind_events()
+
+    def setup_modern_theme(self):
+        """Setup modern dark theme"""
+        try:
+            # Use a modern dark theme
+            self.style = ttk_modern.Style("superhero")  # Dark theme
+            
+            # Configure custom styles
+            self.style.configure('Modern.TFrame', background=MODERN_COLORS['surface'])
+            self.style.configure('Header.TFrame', background=MODERN_COLORS['background'])
+            self.style.configure('Surface.TFrame', background=MODERN_COLORS['surface_light'])
+            self.style.configure('ScrollableFrame.TFrame', background=MODERN_COLORS['background'])
+            
+            self.style.configure('Modern.TLabel', 
+                               background=MODERN_COLORS['surface'],
+                               foreground=MODERN_COLORS['text_primary'],
+                               font=('Segoe UI', 10))
+            
+            self.style.configure('Title.TLabel',
+                               background=MODERN_COLORS['background'],
+                               foreground=MODERN_COLORS['text_primary'],
+                               font=('Segoe UI', 16, 'bold'))
+            
+            self.style.configure('Subtitle.TLabel',
+                               background=MODERN_COLORS['background'],
+                               foreground=MODERN_COLORS['text_secondary'],
+                               font=('Segoe UI', 9))
+                               
+        except Exception as e:
+            LOGGER.warning(f"Failed to setup modern theme: {e}")
+            # Fallback to default theme
+            self.style = ttk.Style()
+
+    def init_single_column_scrollable_ui(self):
+        """Initialize single column scrollable UI layout"""
+        # Configure main frame
+        self.configure(style='Modern.TFrame')
+        
+        # Create main container
+        main_container = ttk_modern.Frame(self, style='Modern.TFrame')
+        main_container.pack(fill=BOTH, expand=True)
+        
+        # Create scrollable frame container
+        self.create_scrollable_container(main_container)
+
+    def create_scrollable_container(self, parent):
+        """Create scrollable container for all content"""
+        # Create canvas and scrollbar for scrolling
+        canvas_frame = ttk_modern.Frame(parent, style='ScrollableFrame.TFrame')
+        canvas_frame.pack(fill=BOTH, expand=True, padx=3, pady=3)  # Reduced padding for 400px width
+        
+        # Canvas for scrollable content
+        self.canvas = tk.Canvas(
+            canvas_frame,
+            bg=MODERN_COLORS['background'],
+            highlightthickness=0,
+            relief='flat'
+        )
+        
+        # Scrollbar
+        scrollbar = ttk_modern.Scrollbar(
+            canvas_frame,
+            orient="vertical",
+            command=self.canvas.yview,
+            style='primary.Vertical.TScrollbar'
+        )
+        
+        # Scrollable frame inside canvas
+        self.scrollable_frame = ttk_modern.Frame(self.canvas, style='ScrollableFrame.TFrame')
+        
+        # Configure scrolling
+        self.scrollable_frame.bind(
+            "<Configure>",
+            lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all"))
+        )
+        
+        # Create window in canvas
+        self.canvas_window = self.canvas.create_window(
+            (0, 0), 
+            window=self.scrollable_frame, 
+            anchor="nw"
+        )
+        
+        # Configure canvas scrolling
+        self.canvas.configure(yscrollcommand=scrollbar.set)
+        
+        # Pack canvas and scrollbar
+        self.canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+        
+        # Bind mousewheel to canvas
+        self.bind_mousewheel()
+        
+        # Bind canvas resize
+        self.canvas.bind('<Configure>', self.on_canvas_configure)
+        
+        # Now create all content in the scrollable frame
+        self.create_single_column_content()
+
+    def bind_mousewheel(self):
+        """Bind mousewheel events for scrolling"""
+        def _on_mousewheel(event):
+            self.canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+        
+        def _bind_to_mousewheel(event):
+            self.canvas.bind_all("<MouseWheel>", _on_mousewheel)
+        
+        def _unbind_from_mousewheel(event):
+            self.canvas.unbind_all("<MouseWheel>")
+        
+        # Bind when mouse enters canvas
+        self.canvas.bind('<Enter>', _bind_to_mousewheel)
+        self.canvas.bind('<Leave>', _unbind_from_mousewheel)
+
+    def on_canvas_configure(self, event):
+        """Handle canvas resize to make scrollable frame fit width"""
+        # Update the scrollable frame width to match canvas width
+        canvas_width = event.width
+        self.canvas.itemconfig(self.canvas_window, width=canvas_width)
+
+    def create_single_column_content(self):
+        """Create all content in single column layout optimized for 400px width"""
+        # Add padding to the main content - reduced for 400px width
+        content_container = ttk_modern.Frame(self.scrollable_frame, style='ScrollableFrame.TFrame')
+        content_container.pack(fill=BOTH, expand=True, padx=8, pady=8)  # Reduced padding
+        
+        # # 1. Header section - Compact version
+        # self.header_frame = ModernHeader(
+        #     content_container, 
+        #     self.station_id,
+        #     style='Header.TFrame'
+        # )
+        # self.header_frame.pack(fill=X, pady=(0, 15))  # Reduced spacing
+        
+        # 2. Camera feed section (optimized for 400px width)
+        camera_section = self.create_section_container(
+            content_container, 
+            "📹 Live Camera Feed"
+        )
+        
+        # Camera feed with optimized sizing for 400px width
+        self.image_feedback_frame = ModernImageFeedback(
+            camera_section, 
+            self.config, 
+            self.feedback_livestream_image_q
+        )
+        self.image_feedback_frame.pack(fill=X, pady=(0, 10))  # Reduced spacing
+        
+        # 3. Command interface section (DISABLED)
+        # Uncomment the lines below to re-enable Quick Actions panel
+        """
+        command_section = self.create_section_container(
+            content_container,
+            "🎮 Quick Actions"
+        )
+        
+        self.cmd_interface_frame = ModernCommandInterface(
+            command_section, 
+            self.config, 
+            self.cmd_request_q, 
+            self.ready_status_q
+        )
+        self.cmd_interface_frame.pack(fill=X, pady=(0, 10))
+        """
+        
+        # Create a minimal command interface for background processing (hidden)
+        hidden_frame = ttk_modern.Frame(content_container, style='ScrollableFrame.TFrame')
+        # Don't pack the hidden_frame - it won't be visible
+        
+        self.cmd_interface_frame = ModernCommandInterface(
+            hidden_frame, 
+            self.config, 
+            self.cmd_request_q, 
+            self.ready_status_q
+        )
+        
+        # 4. Status section - Compact version
+        status_section = self.create_section_container(
+            content_container,
+            ""
+        )
+        
+        self.status_frame = ModernStatusBar(status_section, self.feedback_msg_q)
+        self.status_frame.pack(fill=X, pady=(0, 10))  # Reduced spacing
+        
+        # 5. System information section - Compact version
+        system_section = self.create_section_container(
+            content_container,
+            ""
+        )
+        
+        self.system_panel = ModernSystemPanel(system_section, self.config)
+        self.system_panel.pack(fill=X, pady=(0, 10))  # Reduced spacing
+        
+        # 6. Footer section - Compact version
+        self.init_footer(content_container)
+        
+        # Add some bottom padding for better scrolling - reduced
+        bottom_spacer = ttk_modern.Frame(content_container, style='ScrollableFrame.TFrame', height=30)
+        bottom_spacer.pack(fill=X)
+
+    def create_section_container(self, parent, title):
+        """Create a collapsible section container with title - optimized for 400px width"""
+        # Section frame
+        section_frame = ttk_modern.Frame(parent, style='Surface.TFrame')
+        section_frame.pack(fill=X, pady=(0, 10))  # Reduced spacing
+        
+        # Section header with title - more compact
+        header_frame = tk.Frame(
+            section_frame,
+            bg=MODERN_COLORS['surface_light'],
+            height=35  # Reduced height for compact design
+        )
+        header_frame.pack(fill=X, padx=1, pady=1)
+        header_frame.pack_propagate(False)
+        
+        # Title with more compact styling
+        title_label = tk.Label(
+            header_frame,
+            text=title,
+            font=('Segoe UI', 10, 'bold'),  # Slightly smaller font
+            bg=MODERN_COLORS['surface_light'],
+            fg=MODERN_COLORS['text_primary'],
+            anchor='w'
+        )
+        title_label.pack(side=LEFT, fill=Y, padx=10, pady=6)  # Reduced padding
+        
+        # Content container
+        content_frame = ttk_modern.Frame(section_frame, style='Surface.TFrame')
+        content_frame.pack(fill=X, padx=1, pady=(0, 1))
+        
+        return content_frame
+
+    def init_footer(self, parent):
+        """Initialize compact footer for 400px width"""
+        footer_frame = tk.Frame(
+            parent, 
+            bg=MODERN_COLORS['surface_light'],
+            height=50  # Reduced height
+        )
+        footer_frame.pack(fill=X, pady=(15, 0))  # Reduced spacing
+        footer_frame.pack_propagate(False)
+        
+        # Footer content container - more compact
+        footer_content = tk.Frame(footer_frame, bg=MODERN_COLORS['surface_light'])
+        footer_content.pack(fill=BOTH, expand=True, padx=10, pady=8)  # Reduced padding
+        
+        # Left side - Compact system status indicators
+        left_footer = tk.Frame(footer_content, bg=MODERN_COLORS['surface_light'])
+        left_footer.pack(side=LEFT, fill=Y)
+        
+        # Single row of status indicators for compact design
+        status_row = tk.Frame(left_footer, bg=MODERN_COLORS['surface_light'])
+        status_row.pack(fill=X)
+        
+        status_indicators = [
+            ("DB", "●", MODERN_COLORS['success']),
+            ("CAM", "●", MODERN_COLORS['success']),
+            ("NET", "●", MODERN_COLORS['success']),
+            ("AI", "●", MODERN_COLORS['success'])
+        ]
+        
+        for i, (name, indicator, color) in enumerate(status_indicators):
+            self.create_compact_status_indicator(status_row, name, indicator, color)
+        
+        # Right side - Compact version and time
+        right_footer = tk.Frame(footer_content, bg=MODERN_COLORS['surface_light'])
+        right_footer.pack(side=RIGHT, fill=Y)
+        
+        # Version info - smaller
+        version_label = tk.Label(
+            right_footer,
+            text="v1.0.0",
+            font=('Segoe UI', 8, 'bold'),  # Smaller font
+            bg=MODERN_COLORS['surface_light'],
+            fg=MODERN_COLORS['text_primary']
+        )
+        version_label.pack(anchor='e')
+        
+        # Time display - smaller
+        self.time_label = tk.Label(
+            right_footer,
+            text="",
+            font=('Segoe UI', 7),  # Smaller font
+            bg=MODERN_COLORS['surface_light'],
+            fg=MODERN_COLORS['text_secondary']
+        )
+        self.time_label.pack(anchor='e', pady=(3, 0))  # Reduced spacing
+        
+        # Start time update
+        self.update_time()
+
+    def create_compact_status_indicator(self, parent, name, indicator, color):
+        """Create a compact status indicator for 400px width"""
+        indicator_frame = tk.Frame(parent, bg=MODERN_COLORS['surface_light'])
+        indicator_frame.pack(side=LEFT, padx=(0, 8))  # Reduced spacing
+        
+        # Status dot
+        dot_label = tk.Label(
+            indicator_frame, 
+            text=indicator,
+            foreground=color,
+            background=MODERN_COLORS['surface_light'],
+            font=('Segoe UI', 8)  # Smaller font
+        )
+        dot_label.pack(side=LEFT, padx=(0, 3))  # Reduced spacing
+        
+        # Status text - abbreviated for compact design
+        text_label = tk.Label(
+            indicator_frame,
+            text=name,
+            font=('Segoe UI', 7),  # Smaller font
+            bg=MODERN_COLORS['surface_light'],
+            fg=MODERN_COLORS['text_secondary']
+        )
+        text_label.pack(side=LEFT)
+
+    def update_time(self):
+        """Update time display"""
+        current_time = datetime.now().strftime("%H:%M:%S")
+        current_date = datetime.now().strftime("%m-%d")  # Shortened date format
+        self.time_label.configure(text=f"{current_date} {current_time}")
+        self.after(1000, self.update_time)
+
+    def scroll_to_top(self):
+        """Scroll to top of the interface"""
+        self.canvas.yview_moveto(0)
+
+    def scroll_to_section(self, section_name):
+        """Scroll to a specific section"""
+        # You can implement section-specific scrolling here
+        # For example, scroll to camera section, status section, etc.
+        pass
+
+    def auto_scroll_to_status(self):
+        """Auto scroll to status section during authentication"""
+        # This can be called during authentication to focus on status
+        # Calculate approximate position of status section
+        self.canvas.yview_moveto(0.6)  # Adjust based on your layout
+
+    def generate_station_id(self):
+        """Generate a unique station ID based on hostname and IP"""
+        try:
+            hostname = socket.gethostname()
+            local_ip = socket.gethostbyname(hostname)
+            station_id = f"ETC_{hostname}_{local_ip.replace('.', '_')}"
+            return station_id
+        except Exception as e:
+            LOGGER.error(f"Error generating station ID: {e}")
+            return "ETC_UNKNOWN_STATION"
+
+    def start_app_status_heartbeat(self):
+        """Start sending regular status pings to the server"""
+        try:
+            DatabaseHandler.send_app_status_ping(self.station_id)
+            DatabaseHandler.init_app_status_heartbeat(self.station_id, interval_seconds=60)
+            LOGGER.info("App status heartbeat initialized successfully")
+        except Exception as e:
+            LOGGER.error(f"Failed to initialize app status heartbeat: {e}")
+
+    def begin_processors(self):
+        """Start all processors"""
+        self.begin_web_socket_server()
+        time.sleep(self.START_DELAY)
+        self.begin_image_processing()
+        self.begin_face_processing()
+
+    def begin_image_processing(self):
+        self.image_processor.start()
+
+    def begin_face_processing(self):
+        self.face_processor.start()
+
+    def begin_web_socket_server(self):
+        self.socket_handler.start()
+
+    def init_modern_window_properties(self):
+        """Initialize modern window properties - Set to 400px width and position at top right"""
+        self.parent.title(f'ENVIS Face Recognition - {self.station_id}')
+        self.parent.configure(bg=MODERN_COLORS['background'])
+        
+        # Set window size to exactly 400px width
+        self.parent.minsize(400, 600)  # Minimum width set to 400px
+        self.parent.maxsize(400, 1200)  # Maximum width set to 400px to prevent resizing wider
+        
+        # Set initial size to 400px width
+        self.parent.geometry("400x950")  # Fixed width of 400px
+        
+        # Disable horizontal resizing while allowing vertical resizing
+        self.parent.resizable(False, True)  # width=False, height=True
+        
+        # Force window to always be on top
+        self.parent.attributes("-topmost", True)
+        
+        # Position window at top right corner instead of centering
+        self.position_window_top_right()
+
+    def center_window(self):
+        """Center window on screen - kept for compatibility but not used by default"""
+        self.parent.update_idletasks()
+        width = self.parent.winfo_width()
+        height = self.parent.winfo_height()
+        x = (self.parent.winfo_screenwidth() // 2) - (width // 2)
+        y = (self.parent.winfo_screenheight() // 2) - (height // 2)
+        self.parent.geometry(f"{width}x{height}+{x}+{y}")
+
+    def position_window_top_right(self):
+        """Position window at top right corner of screen"""
+        # Update window to get actual dimensions
+        self.parent.update_idletasks()
+        
+        # Get screen dimensions
+        screen_width = self.parent.winfo_screenwidth()
+        screen_height = self.parent.winfo_screenheight()
+        
+        # Get window dimensions
+        window_width = self.parent.winfo_width()
+        window_height = self.parent.winfo_height()
+        
+        # Calculate position for top right corner
+        # Leave small margin from edges (e.g., 10 pixels)
+        margin = 10
+        x_position = screen_width - window_width - margin
+        y_position = margin
+        
+        # Set window position
+        self.parent.geometry(f"{window_width}x{window_height}+{x_position}+{y_position}")
+        
+        LOGGER.info(f"Window positioned at top right: {x_position}, {y_position}")
+
+    def bind_events(self):
+        """Bind keyboard and window events"""
+        # Keyboard shortcuts
+        self.parent.bind('<F1>', lambda event: self.scroll_to_top())
+        self.parent.bind('<F2>', lambda event: window_utility.align_window(
+            self.parent, window_utility.ALIGN_TOP_RIGHT))
+        self.parent.bind('<F3>', lambda event: window_utility.print_window_properties(self.parent))
+        self.parent.bind('<Escape>', lambda event: self.quit_app())
+        self.parent.bind('<Home>', lambda event: self.scroll_to_top())
+        self.parent.bind('<End>', lambda event: self.canvas.yview_moveto(1))
+        
+        # Page up/down for scrolling
+        self.parent.bind('<Prior>', lambda event: self.canvas.yview_scroll(-1, "pages"))
+        self.parent.bind('<Next>', lambda event: self.canvas.yview_scroll(1, "pages"))
+        
+        # Arrow keys for scrolling
+        self.parent.bind('<Up>', lambda event: self.canvas.yview_scroll(-1, "units"))
+        self.parent.bind('<Down>', lambda event: self.canvas.yview_scroll(1, "units"))
+        
+        # Window events
+        self.parent.bind('<<ON_IMAGE_FEEDBACK_SET>>', 
+                        lambda event: self.align_app_on_image_feedback_set())
+        self.parent.protocol("WM_DELETE_WINDOW", self.quit_app)
+
+    def align_app_on_image_feedback_set(self):
+        """Align app when image feedback is set - modified to use top right positioning"""
+        LOGGER.debug('<<ON_IMAGE_FEEDBACK_SET>>')
+        self.parent.unbind('<<ON_IMAGE_FEEDBACK_SET>>')
+        # Use top right positioning instead of centering
+        window_utility.align_window(self.parent, window_utility.ALIGN_TOP_RIGHT)
+        self.parent.event_generate("<<ON_APP_ALIGNED>>")
+
+    def quit_app(self):
+        """Gracefully quit the application"""
+        if hasattr(self, 'status_frame'):
+            self.status_frame.set_msg('Shutting down...', 'info')
+        
+        self.after(500, lambda: self.exit())
+
+    def exit(self):
+        """Exit the application"""
+        import os
+        LOGGER.info('Application exiting...')
+        
+        # Send final status ping before exit
+        try:
+            import datetime
+            final_status = {
+                "station_id": self.station_id,
+                "hostname": socket.gethostname(),
+                "ip_address": socket.gethostbyname(socket.gethostname()),
+                "timestamp": datetime.datetime.now().isoformat(),
+                "status": "shutting_down",
+                "app_version": "1.0.0",
+                "last_ping": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            }
+            DatabaseHandler.send_app_status_ping(self.station_id)
+            LOGGER.info("Final status ping sent")
+        except Exception as e:
+            LOGGER.error(f"Failed to send final status ping: {e}")
+        
+        os._exit(0)
+
+def main():
+    """Main entry point"""
+    LOGGER.info('Modern 400px Width Application starting...')
+    
+    # Create main window with modern styling and 400px width
+    root = ttk_modern.Window(
+        title="ENVIS Face Recognition System",
+        themename="superhero",  # Modern dark theme
+        size=(400, 800),  # Fixed width of 400px
+        resizable=(False, True)  # Disable horizontal resizing
+    )
+    
+    # Apply additional window styling
+    root.configure(bg=MODERN_COLORS['background'])
+    
+    # Set window constraints to maintain 400px width
+    root.minsize(400, 600)
+    root.maxsize(400, 1200)
+    
+    # Create and pack the application
+    app = ModernAuthenticationApplication(root)
+    app.pack(side="top", fill="both", expand=True)
+    
+    # Open web browser
+    webbrowser.open("http://localhost:8080/psms/mcs/ETC.xhtml?mode=facial&inout=O")
+    
+    # Start the application
+    root.mainloop()
+
+if __name__ == "__main__":
+    main()

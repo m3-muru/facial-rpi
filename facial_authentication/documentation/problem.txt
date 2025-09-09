@@ -1,0 +1,21 @@
+Created heartbeat checker to check if ailanthus server is alive while the GUI app is running
+
+Required outcomes
+	if ailanthus still alive:
+		do nothing
+	if ailanthus is not alive:
+		popup window and exit application
+
+Problem #1:
+	Heartbeat checker is a long surviving operation, meaning to say it cannot exist on the same thread as the GUI (tkinter) if not the GUI will freeze
+Solution #1:
+	Heartbeat checker needs to be on a thread by itself, on every check, provide a feedback indicating if a heartbeat is still there
+
+To check the heartbeat status:
+    1. Use queue and make:
+        Heartbeat checker to push heartbeat status onto the queue
+        GUI to poll for the status every x seconds and perform resulting actions
+    2. Use a global variable shared between heartbeat checker thread and the GUI thread:
+        Heartbeat checker to update variable every x seconds
+        GUI to check this variable every X seconds and perform resulting actions
+

@@ -2,6 +2,7 @@
 # Edit at https://www.toptal.com/developers/gitignore?templates=windows,linux,python
 facial_authentication/Python38/
 facial_authentication/venv*/
+facial_authentication/library_whl/
 
 ### MicrosoftOffice ###
 *.tmp

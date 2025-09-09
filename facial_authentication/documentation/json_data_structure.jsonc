@@ -1,0 +1,36 @@
+// on_fp_enroll_result
+// Persisted JSON data structure in DB
+{
+    "employee_id": "John",
+    "fp": {
+        "version": "...",
+        "features_type": "...",
+        "flags": "...",
+        "adaptive_descriptor_nomask": "...",
+        "adaptive_descriptor_withmask": "...",
+        "enroll_descriptor": "..."
+    }
+}
+
+
+// Parsed and processed dict structure in Python
+{
+    "John": [
+        rsid_py.Faceprints, 
+        rsid_py.Faceprints,
+        rsid_py.Faceprints
+        // ...
+    ],
+    "DJ": [
+        rsid_py.Faceprints, 
+        rsid_py.Faceprints,
+        rsid_py.Faceprints
+        // ...
+    ],
+    "Jane": [
+        rsid_py.Faceprints, 
+        rsid_py.Faceprints,
+        rsid_py.Faceprints
+        // ...
+    ]
+}
